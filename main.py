@@ -128,7 +128,7 @@ def main():
         actions_target = utils.scale_actions(unscaled_actions, 
                                              env.action_space.low,
                                              env.action_space.low)
-        target_next_actions = tf.stop_gradient(actions_target)
+        actions_target = tf.stop_gradient(actions_target)
 
     with tf.variable_scope('critic'):
         q_values_of_given_actions = critic.model.predict( \
@@ -138,8 +138,9 @@ def main():
             tf.concat([state_placeholder, actions], axis=1))
 
     with tf.variable_scope('target_critic'):
-        next_target_q_values = tf.stop_gradient(tf.concat( \
-            [next_state_placeholder, target_next_actions], axis=1))
+        next_target_q_values = target_critic.model.predict(tf.concat( \
+            [next_state_placeholder, actions_target], axis=1))
+        next_target_q_values = tf.stop_gradient(next_target_q_values)
 
 
 
