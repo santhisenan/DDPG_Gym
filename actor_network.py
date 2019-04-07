@@ -3,13 +3,15 @@ from tensorflow import keras
 
 class ActorNetwork(object):
     def __init__(self, state_dim, action_dim, 
-                 h1_actor, h2_actor, h3_actor):
+                 h1_actor, h2_actor, h3_actor, dropout):
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.h1_actor = h1_actor
         self.h2_actor = h2_actor
         self.h3_actor = h3_actor
+        self.dropout = dropout
         self.model = self.create_network()
+
 
     def create_network(self):
         inputs = keras.Input(shape=self.state_dim)

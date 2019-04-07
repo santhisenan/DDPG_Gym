@@ -106,14 +106,17 @@ def main():
     episode_incr_op = episodes.assign_add(1)
 
     actor = ActorNetwork(STATE_DIM, ACTION_DIM, 
-                         HIDDEN_1_ACTOR, HIDDEN_2_ACTOR, HIDDEN_3_ACTOR)
+                         HIDDEN_1_ACTOR, HIDDEN_2_ACTOR, HIDDEN_3_ACTOR,
+                         DROPOUT_ACTOR)
     target_actor = ActorNetwork(STATE_DIM, ACTION_DIM,
-                                HIDDEN_1_ACTOR, HIDDEN_2_ACTOR, HIDDEN_3_ACTOR)
+                                HIDDEN_1_ACTOR, HIDDEN_2_ACTOR, HIDDEN_3_ACTOR,
+                                DROPOUT_ACTOR)
     critic = CriticNetwork(STATE_DIM, ACTION_DIM,
-                           HIDDEN_1_CRITIC, HIDDEN_2_CRITIC, HIDDEN_3_CRITIC)
+                           HIDDEN_1_CRITIC, HIDDEN_2_CRITIC, HIDDEN_3_CRITIC,
+                           DROPOUT_CRITIC)
     target_critic = CriticNetwork(STATE_DIM, ACTION_DIM,
                                   HIDDEN_1_CRITIC, HIDDEN_2_CRITIC, 
-                                  HIDDEN_3_CRITIC)
+                                  HIDDEN_3_CRITIC, DROPOUT_CRITIC)
 
     with tf.variable_scope('actor'):
         unscaled_actions = actor.model.predict(state_placeholder)
