@@ -10,11 +10,13 @@ class ActorNetwork(object):
         self.h2_actor = h2_actor
         self.h3_actor = h3_actor
         self.dropout = dropout
-        self.model = self.create_network()
+        self.model, self.actions = self.create_network()
 
-
+    def predict_actions(self, state):
+        return self.model.predict(state)
+        
     def create_network(self):
-        inputs = keras.Input(shape=self.state_dim)
+        inputs = keras.Input(shape=(self.state_dim,))
         hidden_1 = keras.layers.Dense(self.h1_actor, 
                                       activation=tf.nn.relu)(inputs)
         # TODO: Add dropout
@@ -31,4 +33,4 @@ class ActorNetwork(object):
         model = keras.Model(inputs=inputs, outputs=output,
                             name='actor_network')
 
-        return model
+        return model, output

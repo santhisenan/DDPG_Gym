@@ -10,7 +10,7 @@ from replay_buffer import ReplayBuffer as Memory
 from actor_network import ActorNetwork
 from critic_network import CriticNetwork
 
-import utils
+from utils import *
 
 GAMMA = 0.99
 ENV_NAME = 'Pendulum-v0'
@@ -83,7 +83,7 @@ def main():
                                exploration_theta=EXPLORATION_THETA,
                                exploration_sigma=EXPLORATION_SIGMA)
     
-    np.set_printoptions(threshold=np.nan)
+    # np.set_printoptions(threshold=np.nan)
 
     replay_memory = Memory(REPLAY_MEM_CAPACITY)
 
@@ -119,13 +119,14 @@ def main():
                                   HIDDEN_3_CRITIC, DROPOUT_CRITIC)
 
     with tf.variable_scope('actor'):
-        unscaled_actions = actor.model.predict(state_placeholder)
-        actions = utils.scale_actions(unscaled_actions, env.action_space.low, 
+        # unscaled_actions = actor.model.predict(state_placeholder, steps=1)
+        unscaled_actions = actor.predict_actions(state_placeholder, steps=1)
+        actions = scale_actions(unscaled_actions, env.action_space.low, 
                                       env.action_space.low)
     
     with tf.variable_scope('target_actor'):
         unscaled_actions = target_actor.model.predict(state_placeholder)
-        actions_target = utils.scale_actions(unscaled_actions, 
+        actions_target = scale_actions(unscaled_actions, 
                                              env.action_space.low,
                                              env.action_space.low)
         actions_target = tf.stop_gradient(actions_target)
@@ -177,8 +178,84 @@ def main():
     actor_train_op = tf.train.AdamOptimizer(LEARNING_RATE_ACTOR * LR_DECAY ** 
         episodes).minimize(actor_loss, var_list=actor_vars)
 
+    # Init session
+    sess = tf.Session()
+    sess.run(tf.global_variables_initializer())
 
+    # Training
+    num_steps = 0
+    for episode in range(NUM_EPISODES):
+        total_reward = 0
+        num_steps_in_episode = 0
 
+        # Create noise
+        noise = np.zeros(ACTION_DIM)
+        noise_scale = (INITIAL_NOISE_SCALE * NOISE_DECAY ** episode) * \
+            (env.action_space.high - env.action_space.low) #TODO: uses env
+        
+        # Initial state
+        state = env.reset() #TODO: uses env
+
+        for t in range(MAX_STEPS_PER_EPISODE):
+            env.render()
+            
+            print("State" + str(state[None]))
+            # Choose an action
+            action = sess.run(actions, feed_dict={ \
+                state_placeholder: state[None],
+                is_training_placeholder: False})
+
+            # Add Noise to actions
+            noise = EXPLORATION_THETA * (EXPLORATION_MU - noise) + \
+                EXPLORATION_SIGMA * np.random.randn(ACTION_DIM)
+
+            action += noise_scale * noise
+
+            # Take action on env
+            next_state, reward, done, _info = env.step(action) #TODO: uses env
+            total_reward += reward
+            replay_memory.insert(state, action, reward, done, next_state)
+
+            if num_steps % TRAIN_EVERY == 0 and \
+                replay_memory.size() >= MINI_BATCH_SIZE :
+                minibatch = replay_memory.sample_batch(MINI_BATCH_SIZE)
+                _, _ = sess.run([critic_train_op, actor_train_op], \
+                    feed_dict={
+                        state_placeholder: np.asarray(
+                            [e[0] for e in minibatch]),
+
+                        action_placeholder: np.asarray(
+                            [e[1] for e in minibatch]),
+
+                        reward_placeholder: np.asarray(
+                            [e[2] for e in minibatch]),
+
+                        next_state_placeholder: np.asarray(
+                            [e[3] for e in minibatch]),
+
+                        is_not_terminal_placeholder: np.asarray(
+                            [e[4] for e in minibatch]),
+
+                        is_training_placeholder: True
+                })
+                update_target_networks(sess, TAU, 
+                                       target_actor_vars, actor_vars, 
+                                       target_critic_vars, critic_vars)
+
+            state = next_state
+            num_steps += 1
+            num_steps_in_episode += 1
+
+            if done:
+                _ = sess.run(episode_incr_op)
+                break     
+
+        print(str((episode, total_reward, num_steps_in_episode, noise_scale)))
+
+    write_to_file('info.json', json.dumps(info))
+    env.close()
+    # gym.upload(OUTPUT_DIR)
+            
 main()
 
 

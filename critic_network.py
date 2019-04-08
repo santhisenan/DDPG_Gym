@@ -14,9 +14,13 @@ class CriticNetwork(object):
         self.dropout = dropout
 
         self.model = self.create_network()
+        
+    def predict_q_values(self, state, action):
+        state_action = tf.concat(state, action)
+        return self.model.predict(state_action)
 
     def create_network(self):
-        inputs = keras.Input(shape=self.input_dim)
+        inputs = keras.Input(shape=(self.input_dim,))
 
         hidden_1 = keras.layers.Dense(self.h1_critic,
                                       activation=tf.nn.relu)(inputs)
