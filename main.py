@@ -22,7 +22,7 @@ HIDDEN_2_CRITIC = 8
 HIDDEN_3_CRITIC = 8
 LEARNING_RATE_ACTOR = 1e-3
 LEARNING_RATE_CRITIC = 1e-3 #TODO
-L2_DECAY = 1
+LR_DECAY = 1
 L2_REG_ACTOR = 1e-6
 L2_REG_CRITIC = 1e-6
 DROPOUT_ACTOR = 0
@@ -66,7 +66,7 @@ def main():
                                h3_critic=HIDDEN_3_CRITIC,
                                lr_actor=LEARNING_RATE_ACTOR,
                                lr_critic=LEARNING_RATE_CRITIC,
-                               lr_decay=L2_DECAY,
+                               lr_decay=LR_DECAY,
                                l2_reg_actor=L2_REG_ACTOR,
                                l2_reg_critic=L2_REG_CRITIC,
                                dropout_actor=DROPOUT_ACTOR,
@@ -95,7 +95,7 @@ def main():
                                        shape=(None, STATE_DIM))
     action_placeholder = tf.placeholder(dtype=tf.float32, \
                                         shape=(None, ACTION_DIM))
-    reward = tf.placeholder(dtype=tf.float32)
+    reward_placeholder = tf.placeholder(dtype=tf.float32)
     next_state_placeholder = tf.placeholder(dtype=tf.float32,
                                        shape=(None, STATE_DIM))
     is_not_terminal_placeholder = tf.placeholder(dtype=tf.float32)
@@ -142,12 +142,40 @@ def main():
             [next_state_placeholder, actions_target], axis=1))
         next_target_q_values = tf.stop_gradient(next_target_q_values)
 
+    # Isolate variables in each network
+    actor_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, 
+                                     scope='actor')
+    target_actor_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, 
+                                     scope='target_actor')
+    critic_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
+                                     scope='critic')
+    target_critic_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,
+                                     scope='target_critic')
 
+    targets = tf.expand_dims(reward_placeholder, 1) + \
+        tf.expand_dims(is_not_terminal_placeholder, 1) * GAMMA * \
+            next_target_q_values
+    td_errors = targets - q_values_of_given_actions
+    critic_loss = tf.reduce_mean(tf.square(td_errors))
 
+    # Update critic networks after computing loss
+    for var in critic_vars:
+        if not 'bias' in var.name:
+            critic_loss += L2_REG_CRITIC * 0.5 * tf.nn.l2_loss(var)
 
+    # optimize critic
+    critic_train_op = tf.train.AdamOptimizer(LEARNING_RATE_CRITIC * LR_DECAY **
+                                             episodes).minimize(critic_loss)
+    
+    # Actor's loss
+    actor_loss = -1 * tf.reduce_mean(q_values_of_suggested_actions)
+    for var in actor_vars:
+        if not 'bias' in var.name:
+            actor_loss += L2_REG_ACTOR * 0.5 * tf.nn.l2_loss(var)
 
-
-                        
+    # Optimize actor
+    actor_train_op = tf.train.AdamOptimizer(LEARNING_RATE_ACTOR * LR_DECAY ** 
+        episodes).minimize(actor_loss, var_list=actor_vars)
 
 
 
