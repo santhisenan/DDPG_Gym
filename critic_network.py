@@ -1,40 +1,33 @@
 import tensorflow as tf
-from tensorflow import keras
 
-class CriticNetwork(object):
-    def __init__(self, state_dim, action_dim, 
-                 h1_critic, h2_critic, h3_critic, 
-                 dropout):
+class CriticNetwork(tf.keras.Model):
+    def __init__(self, state_dim, action_dim, h1_critic, h2_critic, h3_critic,
+                 trainable):
+        super(CriticNetwork, self).__init__(name='critic_network')
         self.state_dim = state_dim
         self.action_dim = action_dim
-        self.input_dim = self.state_dim + self.action_dim
         self.h1_critic = h1_critic
         self.h2_critic = h2_critic
         self.h3_critic = h3_critic
-        self.dropout = dropout
 
-        self.model = self.create_network()
-        
-    def predict_q_values(self, state, action):
-        state_action = tf.concat(state, action)
-        return self.model.predict(state_action)
+        # The layers of the model
+        self.hidden_1 = tf.layers.Dense(units=h1_critic, activation=tf.nn.relu,
+                                        trainable=trainable,
+                                        name='hidden_1')
+        self.hidden_2 = tf.layers.Dense(units=h2_critic, activation=tf.nn.relu,
+                                        trainable=trainable,
+                                        name='hidden_2')
+        self.hidden_3 = tf.layers.Dense(units=h3_critic, activation=tf.nn.relu,
+                                        trainable=trainable,
+                                        name='hidden_3')
+        self.output_layer = tf.layers.Dense(units=1,
+                                            trainable=trainable,
+                                            name='output_layer')  # Default
+        # activation function
 
-    def create_network(self):
-        inputs = keras.Input(shape=(None, self.input_dim,))
-
-        hidden_1 = keras.layers.Dense(self.h1_critic, kernel_initializer='random_uniform',
-                                      activation=tf.nn.relu)(inputs)
-        # TODO: Add dropout
-
-        hidden_2 = keras.layers.Dense(self.h2_critic, kernel_initializer='random_uniform',activation=tf.nn.relu)            (hidden_1)
-
-        hidden_3 = keras.layers.Dense(self.h3_critic, kernel_initializer='random_uniform',activation=tf.nn.relu)            (hidden_2)
-
-        output = keras.layers.Dense(1, kernel_initializer='random_uniform',activation=tf.nn.tanh)(hidden_3)
-
-        model = keras.Model(inputs=inputs, outputs=output,
-                            name='critic_network')
-
-        return model
-
-
+    def call(self, input_state, input_action):
+        inputs = tf.concat([input_state, input_action], axis=1)
+        x = self.hidden_1(inputs)
+        x = self.hidden_2(x)
+        x = self.hidden_3(x)
+        return self.output_layer(x)

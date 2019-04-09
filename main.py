@@ -1,6 +1,6 @@
 import tensorflow as tf 
 import gym
-from gym import wrappers
+# from gym import wrappers
 import numpy as np 
 import json, sys, os
 from os import path
@@ -21,7 +21,7 @@ HIDDEN_1_CRITIC = 8
 HIDDEN_2_CRITIC = 8
 HIDDEN_3_CRITIC = 8
 LEARNING_RATE_ACTOR = 1e-3
-LEARNING_RATE_CRITIC = 1e-3 #TODO
+LEARNING_RATE_CRITIC = 1e-4 #TODO
 LR_DECAY = 1
 L2_REG_ACTOR = 1e-6
 L2_REG_CRITIC = 1e-6
@@ -53,38 +53,6 @@ def main():
     env.seed(0)
     np.random.seed(0)
 
-    # env = wrappers.Monitor(env, OUTPUT_DIR, force=True)
-
-    info = {}
-    info['env_id'] = env.spec.id #TODO
-    info['parameters'] = dict( gamma=GAMMA,
-                               h1_actor=HIDDEN_1_ACTOR,
-                               h2_actor=HIDDEN_2_ACTOR,
-                               h3_actor=HIDDEN_3_ACTOR,
-                               h1_critic=HIDDEN_1_CRITIC,
-                               h2_critic=HIDDEN_2_CRITIC,
-                               h3_critic=HIDDEN_3_CRITIC,
-                               lr_actor=LEARNING_RATE_ACTOR,
-                               lr_critic=LEARNING_RATE_CRITIC,
-                               lr_decay=LR_DECAY,
-                               l2_reg_actor=L2_REG_ACTOR,
-                               l2_reg_critic=L2_REG_CRITIC,
-                               dropout_actor=DROPOUT_ACTOR,
-                               dropout_critic=DROPOUT_CRITIC,
-                               num_episodes=NUM_EPISODES,
-                               max_steps_ep=MAX_STEPS_PER_EPISODE,
-                               tau=TAU,
-                               train_every=TRAIN_EVERY,
-                               replay_memory_capacity=REPLAY_MEM_CAPACITY,
-                               minibatch_size=MINI_BATCH_SIZE,
-                               initial_noise_scale=INITIAL_NOISE_SCALE,
-                               noise_decay=NOISE_DECAY,
-                               exploration_mu=EXPLORATION_MU,
-                               exploration_theta=EXPLORATION_THETA,
-                               exploration_sigma=EXPLORATION_SIGMA)
-    
-    # np.set_printoptions(threshold=np.nan)
-
     replay_memory = Memory(REPLAY_MEM_CAPACITY)
 
     # Tensorflow part starts here!
@@ -95,7 +63,7 @@ def main():
                                        shape=(None, STATE_DIM))
     action_placeholder = tf.placeholder(dtype=tf.float32, \
                                         shape=(None, ACTION_DIM))
-    reward_placeholder = tf.placeholder(dtype=tf.float32)
+    reward_placeholder = tf.placeholder(dtype=tf.float32, shape=(None))
     next_state_placeholder = tf.placeholder(dtype=tf.float32,
                                        shape=(None, STATE_DIM))
     is_not_terminal_placeholder = tf.placeholder(dtype=tf.float32)
@@ -105,52 +73,56 @@ def main():
     episodes = tf.Variable(0.0, trainable=False, name='episodes')
     episode_incr_op = episodes.assign_add(1)
 
-    actor = ActorNetwork(STATE_DIM, ACTION_DIM, 
-                         HIDDEN_1_ACTOR, HIDDEN_2_ACTOR, HIDDEN_3_ACTOR,
-                         DROPOUT_ACTOR)
-    target_actor = ActorNetwork(STATE_DIM, ACTION_DIM,
-                                HIDDEN_1_ACTOR, HIDDEN_2_ACTOR, HIDDEN_3_ACTOR,
-                                DROPOUT_ACTOR)
-    critic = CriticNetwork(STATE_DIM, ACTION_DIM,
-                           HIDDEN_1_CRITIC, HIDDEN_2_CRITIC, HIDDEN_3_CRITIC,
-                           DROPOUT_CRITIC)
-    target_critic = CriticNetwork(STATE_DIM, ACTION_DIM,
-                                  HIDDEN_1_CRITIC, HIDDEN_2_CRITIC, 
-                                  HIDDEN_3_CRITIC, DROPOUT_CRITIC)
-
     with tf.variable_scope('actor'):
-        unscaled_actions = actor.model.__call__(state_placeholder)
-        actions = scale_actions(unscaled_actions, env.action_space.low, 
-                                    env.action_space.high)
+        actor = ActorNetwork(STATE_DIM, ACTION_DIM,
+                             HIDDEN_1_ACTOR, HIDDEN_2_ACTOR, HIDDEN_3_ACTOR,
+                             trainable=True)
+        unscaled_actions = actor.call(state_placeholder)
+        actions = scale_actions(unscaled_actions, env.action_space.low,
+                                env.action_space.high)
 
     with tf.variable_scope('target_actor'):
-        unscaled_actions = target_actor.model.__call__(state_placeholder)
-
-        actions_target = scale_actions(unscaled_actions, 
-                                             env.action_space.low,
-                                             env.action_space.low)
-        actions_target = tf.stop_gradient(actions_target)
+        target_actor = ActorNetwork(STATE_DIM, ACTION_DIM,
+                                    HIDDEN_1_ACTOR, HIDDEN_2_ACTOR, 
+                                    HIDDEN_3_ACTOR,
+                                    trainable=True)
+        unscaled_target_actions = target_actor.call(state_placeholder)
+        actions_target_temp = scale_actions(unscaled_target_actions,
+                                       env.action_space.low,
+                                       env.action_space.low)
+        actions_target = tf.stop_gradient(actions_target_temp)
 
     with tf.variable_scope('critic'):
-        state_action_placeholder = tf.concat([state_placeholder, 
-                                              action_placeholder], axis=1) 
-        q_values_of_given_actions = critic.model.__call__( \
-            state_action_placeholder)
-        
-        state_suggested_action_placeholder = tf.concat([state_placeholder, 
-                                                        actions], axis=1)
-        q_values_of_suggested_actions = critic.model.__call__( \
-            state_suggested_action_placeholder)
+        critic = CriticNetwork(STATE_DIM, ACTION_DIM,
+                               HIDDEN_1_CRITIC, HIDDEN_2_CRITIC, 
+                               HIDDEN_3_CRITIC,
+                               trainable=True)
+        q_values_of_given_actions = critic.call(state_placeholder,
+                                                action_placeholder)
 
+        q_values_of_suggested_actions = critic.call(state_placeholder, actions)
+
+    
     with tf.variable_scope('target_critic'):
-        next_target_q_values = target_critic.model.__call__(tf.concat( \
-            [next_state_placeholder, actions_target], axis=1))
+        target_critic = CriticNetwork(STATE_DIM, ACTION_DIM,
+                                      HIDDEN_1_CRITIC, HIDDEN_2_CRITIC,
+                                      HIDDEN_3_CRITIC, trainable=True)
+        next_target_q_values = target_critic.call(next_state_placeholder, 
+                                                  actions_target)
+        
         next_target_q_values = tf.stop_gradient(next_target_q_values)
 
-    actor_vars = actor.model.weights
-    target_actor_vars = target_actor.model.weights
-    critic_vars = critic.model.weights
-    target_critic_vars = target_critic.model.weights
+    actor_vars = tf.get_collection(
+        tf.GraphKeys.TRAINABLE_VARIABLES, scope='actor')
+
+    target_actor_vars = tf.get_collection(
+        tf.GraphKeys.GLOBAL_VARIABLES, scope='target_actor')
+
+    critic_vars = tf.get_collection(
+        tf.GraphKeys.TRAINABLE_VARIABLES, scope='critic')
+
+    target_critic_vars = tf.get_collection(
+        tf.GraphKeys.GLOBAL_VARIABLES, scope='target_critic')
 
     targets = tf.expand_dims(reward_placeholder, 1) + \
         tf.expand_dims(is_not_terminal_placeholder, 1) * GAMMA * \
@@ -163,6 +135,7 @@ def main():
         if not 'bias' in var.name:
             critic_loss += L2_REG_CRITIC * 0.5 * tf.nn.l2_loss(var)
 
+    print(critic_vars)
     # optimize critic
     critic_train_op = tf.train.AdamOptimizer(LEARNING_RATE_CRITIC * LR_DECAY **
                                              episodes).minimize(critic_loss)
@@ -209,7 +182,7 @@ def main():
         state = env.reset() #TODO: uses env
 
         for t in range(MAX_STEPS_PER_EPISODE):
-            env.render()
+            # env.render()
             # Reshape State
             # print("State initial" + str(state.shape)) (3,1)
             state_to_feed = state.reshape(1, state.shape[0])
@@ -244,7 +217,8 @@ def main():
                     feed_dict={
                         state_placeholder: state_batch,
 
-                        action_placeholder: np.asarray([a[0] for a in action_batch]),
+                        action_placeholder: np.asarray( \
+                            [a[0] for a in action_batch]),
 
                         reward_placeholder: reward_batch,
                     
@@ -270,7 +244,7 @@ def main():
 
         print(str((episode, total_reward, num_steps_in_episode, noise_scale)))
 
-    write_to_file('info.json', json.dumps(info))
+    # write_to_file('info.json', json.dumps(info))
     env.close()
     # gym.upload(OUTPUT_DIR)
 
