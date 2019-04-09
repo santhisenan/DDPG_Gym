@@ -20,19 +20,17 @@ class CriticNetwork(object):
         return self.model.predict(state_action)
 
     def create_network(self):
-        inputs = keras.Input(shape=(self.input_dim,))
+        inputs = keras.Input(shape=(None, self.input_dim,))
 
-        hidden_1 = keras.layers.Dense(self.h1_critic,
+        hidden_1 = keras.layers.Dense(self.h1_critic, kernel_initializer='random_uniform',
                                       activation=tf.nn.relu)(inputs)
         # TODO: Add dropout
 
-        hidden_2 = keras.layers.Dense(self.h2_critic, activation=tf.nn.relu)\
-            (hidden_1)
+        hidden_2 = keras.layers.Dense(self.h2_critic, kernel_initializer='random_uniform',activation=tf.nn.relu)            (hidden_1)
 
-        hidden_3 = keras.layers.Dense(self.h3_critic, activation=tf.nn.relu)\
-            (hidden_2)
+        hidden_3 = keras.layers.Dense(self.h3_critic, kernel_initializer='random_uniform',activation=tf.nn.relu)            (hidden_2)
 
-        output = keras.layers.Dense(1, activation=tf.nn.tanh)(hidden_3)
+        output = keras.layers.Dense(1, kernel_initializer='random_uniform',activation=tf.nn.tanh)(hidden_3)
 
         model = keras.Model(inputs=inputs, outputs=output,
                             name='critic_network')

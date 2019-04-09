@@ -16,10 +16,10 @@ class ActorNetwork(object):
         return self.model.predict(state, steps=steps)
         
     def create_network(self):
-        input_layer = keras.Input(shape=(None, self.state_dim))
-
+        input_layer = keras.Input(shape=(self.state_dim,))
         hidden_1 = keras.layers.Dense(self.h1_actor, 
                                       activation=tf.nn.relu)(input_layer)
+        # TODO: Add dropout
 
         hidden_2 = keras.layers.Dense(self.h2_actor, activation=tf.nn.relu)\
             (hidden_1)

@@ -37,9 +37,12 @@ class ReplayBuffer(object):
         _actions = np.array([_experience[1] for _experience in batch])
         _rewards = np.array([_experience[2] for _experience in batch])
         _dones = np.array([_experience[3] for _experience in batch])
-        _terminals = np.array([_experience[4] for _experience in batch])
+        _next_states = np.array([_experience[4] for _experience in batch])
 
-        return _states, _actions, _rewards, _dones, _terminals
+        _states = np.squeeze(_states)
+        _next_states = np.squeeze(_next_states)
+        
+        return _states, _actions, _rewards, _dones, _next_states
     
     def clear(self):
         self._buffer.clear()

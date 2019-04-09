@@ -3,7 +3,6 @@ import tensorflow as tf
 def scale_actions(actor_network_outputs, action_bound_low, action_bound_high):
     actions = action_bound_low + tf.nn.sigmoid(actor_network_outputs)* \
         (action_bound_high - action_bound_low)
-    print("*")
     return actions
 
 def update_target_networks(sess, tau, 
@@ -22,6 +21,6 @@ def update_target_networks(sess, tau,
             (1 - tau)*target_critic_var)
         update_targets_ops.append(update_target_critic_op)
 
-    update_targets_op = tf.group(*update_targets_ops, name='update_targets')
+    update_targets_op = tf.group(*update_targets_ops, name='upadte_targets')
     
     sess.run(update_targets_op)
