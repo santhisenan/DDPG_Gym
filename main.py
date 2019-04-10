@@ -52,8 +52,12 @@ def main():
     '''
     env = gym.make(ENV_NAME)
     
-    # env = wrappers.Monitor(env, outdir, force=True)
-
+    # For tensorboard
+    writer = tf.summary.FileWriter("./tensorboard")
+    
+    assert STATE_DIM == np.prod(np.array(env.observation_space.shape))
+    assert ACTION_DIM == np.prod(np.array(env.action_space.shape))
+    
     env.seed(0)
     np.random.seed(0)
 
@@ -68,14 +72,21 @@ def main():
     '''
     # Placeholders
     state_placeholder = tf.placeholder(dtype=tf.float32, \
-                                       shape=[None, STATE_DIM])
+                                       shape=[None, STATE_DIM], 
+                                       name='state_placeholder')
     action_placeholder = tf.placeholder(dtype=tf.float32, \
-                                        shape=(None, ACTION_DIM))
-    reward_placeholder = tf.placeholder(dtype=tf.float32, shape=(None))
+                                        shape=[None, ACTION_DIM],
+                                        name='action_placeholder')
+    reward_placeholder = tf.placeholder(dtype=tf.float32, shape=[None],
+                                        name='reward_placeholder')
     next_state_placeholder = tf.placeholder(dtype=tf.float32,
-                                       shape=(None, STATE_DIM))
-    is_not_terminal_placeholder = tf.placeholder(dtype=tf.float32)
-    is_training_placeholder = tf.placeholder(dtype=tf.float32, shape=())
+                                       shape=[None, STATE_DIM],
+                                       name='next_state_placeholder')
+    is_not_terminal_placeholder = tf.placeholder(dtype=tf.float32, shape=[None],
+        name='is_not_terminal_placeholder')
+        
+    is_training_placeholder = tf.placeholder(dtype=tf.float32, shape=(),
+                                             name='is_training_placeholder')
 
     ''' A counter to count the number of episodes
     '''
@@ -96,9 +107,11 @@ def main():
         actions = scale_actions(unscaled_actions, env.action_space.low,
                                 env.action_space.high)
 
+        
+
     ''' Create the target actor network inside target_actor scope and calculate 
     the target actions. Apply stop_gradient to the target actions so that 
-    thier gradient is not taken at any point of time.
+    thier gradient is not computed at any point of time.
     '''
     with tf.variable_scope('target_actor', reuse=False):
         target_actor = ActorNetwork(STATE_DIM, ACTION_DIM,
@@ -208,6 +221,7 @@ def main():
     # Init session
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
+    writer.add_graph(sess.graph)
 
     # Training
     num_steps = 0
@@ -218,25 +232,16 @@ def main():
         # Create noise
         noise = np.zeros(ACTION_DIM)
         noise_scale = (INITIAL_NOISE_SCALE * NOISE_DECAY ** episode) * \
-            (env.action_space.high - env.action_space.low) #TODO: uses env
+            (env.action_space.high - env.action_space.low)
         
         # Initial state
-        state = env.reset() #TODO: uses env
+        state = env.reset()
 
-        for t in range(MAX_STEPS_PER_EPISODE):
-            # env.render()
-            # Reshape State
-            # print("State initial" + str(state.shape)) (3,1)
-            # state_to_feed = state.reshape(1, state.shape[0])
-            # print("State to feed" + str(state_to_feed.shape)) (1, 3)
-            state = np.squeeze(state)
-            # print("State after " + str(state.shape)) #(3,)
+        for _ in range(MAX_STEPS_PER_EPISODE):
 
-            # Choose an action
             action = sess.run(actions, feed_dict={ \
                 state_placeholder: state[None],
                 is_training_placeholder: False})
-            # print(action)
 
             # Add Noise to actions
             noise = EXPLORATION_THETA * (EXPLORATION_MU - noise) + \
@@ -245,30 +250,35 @@ def main():
             action += noise_scale * noise
 
             # Take action on env
-            next_state, reward, done, _info = env.step(action) #TODO: uses env
+            next_state, reward, done, _info = env.step(action)
+            next_state = np.squeeze(next_state)
+            reward = np.squeeze(reward)
+            action = action[0]
+
             total_reward += reward
-            replay_memory.insert(state, action, reward, done, next_state)
 
-            if num_steps % TRAIN_EVERY == 0 and \
-                replay_memory.size() >= MINI_BATCH_SIZE :
-                state_batch, action_batch, reward_batch, done_batch, \
-                    next_state_batch = \
-                        replay_memory.sample_batch(MINI_BATCH_SIZE)
+            replay_memory.add_to_memory((state, action, reward, next_state,
+                                         0.0 if done else 1.0))
 
-                _, _ = sess.run([critic_train_op, actor_train_op], \
+            if num_steps % TRAIN_EVERY == 0 and replay_memory.size() >= \
+                MINI_BATCH_SIZE :
+                batch = replay_memory.sample_from_memory(MINI_BATCH_SIZE)
+                _, _ = sess.run([critic_train_op, actor_train_op],
                     feed_dict={
-                        state_placeholder: state_batch,
+                        state_placeholder: np.asarray( \
+                            [elem[0] for elem in batch]),
                         action_placeholder: np.asarray( \
-                            [a[0] for a in action_batch]),
-                        reward_placeholder: reward_batch,
-                        is_not_terminal_placeholder: done_batch,
-                        next_state_placeholder: next_state_batch,
+                            [elem[1] for elem in batch]),
+                        reward_placeholder: np.asarray( \
+                            [elem[2] for elem in batch]),
+                        next_state_placeholder: np.asarray( \
+                            [elem[3] for elem in batch]),
+                        is_not_terminal_placeholder: np.asarray( \
+                            [elem[4] for elem in batch]),
                         is_training_placeholder: True
                 })
 
                 _ = sess.run(update_targets_op)
-                # _ = sess.run(update_targets_op)
-
 
             state = next_state
             num_steps += 1
@@ -280,9 +290,7 @@ def main():
 
         print(str((episode, total_reward, num_steps_in_episode, noise_scale)))
 
-    # write_to_file('info.json', json.dumps(info))
     env.close()
-    # gym.upload(OUTPUT_DIR)
 
 main()
 
