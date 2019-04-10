@@ -1,6 +1,6 @@
 import tensorflow as tf 
 import gym
-# from gym import wrappers
+from gym import wrappers
 import numpy as np 
 import json, sys, os
 from os import path
@@ -48,19 +48,27 @@ def write_to_file(file_name, s):
         fh.write(s)
 
 def main():
+    ''' Create the environment
+    '''
     env = gym.make(ENV_NAME)
     
+    # env = wrappers.Monitor(env, outdir, force=True)
+
     env.seed(0)
     np.random.seed(0)
 
+    ''' Create the replay memory
+    '''
     replay_memory = Memory(REPLAY_MEM_CAPACITY)
 
     # Tensorflow part starts here!
     tf.reset_default_graph()
 
+    ''' Create placeholders 
+    '''
     # Placeholders
     state_placeholder = tf.placeholder(dtype=tf.float32, \
-                                       shape=(None, STATE_DIM))
+                                       shape=[None, STATE_DIM])
     action_placeholder = tf.placeholder(dtype=tf.float32, \
                                         shape=(None, ACTION_DIM))
     reward_placeholder = tf.placeholder(dtype=tf.float32, shape=(None))
@@ -69,49 +77,77 @@ def main():
     is_not_terminal_placeholder = tf.placeholder(dtype=tf.float32)
     is_training_placeholder = tf.placeholder(dtype=tf.float32, shape=())
 
-    # Episode counter
+    ''' A counter to count the number of episodes
+    '''
     episodes = tf.Variable(0.0, trainable=False, name='episodes')
     episode_incr_op = episodes.assign_add(1)
 
+    ''' Create the actor network inside the actor scope and calculate actions
+    '''
     with tf.variable_scope('actor'):
         actor = ActorNetwork(STATE_DIM, ACTION_DIM,
                              HIDDEN_1_ACTOR, HIDDEN_2_ACTOR, HIDDEN_3_ACTOR,
                              trainable=True)
         unscaled_actions = actor.call(state_placeholder)
+
+        ''' Scale the actions to fit within the bounds provided by the 
+        environment
+        '''
         actions = scale_actions(unscaled_actions, env.action_space.low,
                                 env.action_space.high)
 
-    with tf.variable_scope('target_actor'):
+    ''' Create the target actor network inside target_actor scope and calculate 
+    the target actions. Apply stop_gradient to the target actions so that 
+    thier gradient is not taken at any point of time.
+    '''
+    with tf.variable_scope('target_actor', reuse=False):
         target_actor = ActorNetwork(STATE_DIM, ACTION_DIM,
                                     HIDDEN_1_ACTOR, HIDDEN_2_ACTOR, 
                                     HIDDEN_3_ACTOR,
                                     trainable=True)
-        unscaled_target_actions = target_actor.call(state_placeholder)
-        actions_target_temp = scale_actions(unscaled_target_actions,
+
+        unscaled_target_actions = target_actor.call(next_state_placeholder)
+        
+        ''' Scale the actions to fit within the bounds provided by the 
+        environment
+        '''
+        target_actions_temp = scale_actions(unscaled_target_actions,
                                        env.action_space.low,
                                        env.action_space.low)
-        actions_target = tf.stop_gradient(actions_target_temp)
+        target_actions = tf.stop_gradient(target_actions_temp)
 
+    ''' Create the critic network inside the critic variable scope. Get the 
+    Q-values of given actions and Q-values of actions suggested by the actor 
+    network.
+    '''
     with tf.variable_scope('critic'):
         critic = CriticNetwork(STATE_DIM, ACTION_DIM,
                                HIDDEN_1_CRITIC, HIDDEN_2_CRITIC, 
                                HIDDEN_3_CRITIC,
                                trainable=True)
+
         q_values_of_given_actions = critic.call(state_placeholder,
                                                 action_placeholder)
-
         q_values_of_suggested_actions = critic.call(state_placeholder, actions)
 
-    
-    with tf.variable_scope('target_critic'):
+    ''' Create the target critic network inside the target_critic variable 
+    scope. Calculate the target Q-values and apply stop_gradient to it.
+    '''
+    with tf.variable_scope('target_critic', reuse=False):
         target_critic = CriticNetwork(STATE_DIM, ACTION_DIM,
                                       HIDDEN_1_CRITIC, HIDDEN_2_CRITIC,
                                       HIDDEN_3_CRITIC, trainable=True)
-        next_target_q_values = target_critic.call(next_state_placeholder, 
-                                                  actions_target)
         
-        next_target_q_values = tf.stop_gradient(next_target_q_values)
+        target_q_values_temp = target_critic.call(next_state_placeholder, 
+                                                  target_actions)
+        target_q_values = tf.stop_gradient(target_q_values_temp)
 
+    ''' Calculate 
+    - trainable variables in actor (Weights of actor network), 
+    - Weights of target actor network
+    - trainable variables in critic (Weights of critic network),
+    - Weights of target critic network
+    '''
     actor_vars = tf.get_collection(
         tf.GraphKeys.TRAINABLE_VARIABLES, scope='actor')
 
@@ -124,9 +160,25 @@ def main():
     target_critic_vars = tf.get_collection(
         tf.GraphKeys.GLOBAL_VARIABLES, scope='target_critic')
 
+    ''' Get the operators for updating the target networks. The 
+    update_target_networks function defined in utils returns a list of operators 
+    to be run from tf session inorder to update the target networks using 
+    soft update.
+    '''
+    update_targets_op = update_target_networks(TAU, \
+        target_actor_vars, actor_vars, target_critic_vars, \
+            critic_vars)
+
+    ''' Create the tf operation to train the critic network:
+    - calculate TD-target 
+    - calculate TD-Error = TD-target - q_values_of_given_actions
+    - calculate Critic network's loss (Mean Squared Error of TD-Errors)
+    - ?
+    - create a tf operation to train the critic network
+    '''
     targets = tf.expand_dims(reward_placeholder, 1) + \
         tf.expand_dims(is_not_terminal_placeholder, 1) * GAMMA * \
-            next_target_q_values
+            target_q_values
     td_errors = targets - q_values_of_given_actions
     critic_loss = tf.reduce_mean(tf.square(td_errors))
 
@@ -135,11 +187,14 @@ def main():
         if not 'bias' in var.name:
             critic_loss += L2_REG_CRITIC * 0.5 * tf.nn.l2_loss(var)
 
-    print(critic_vars)
     # optimize critic
     critic_train_op = tf.train.AdamOptimizer(LEARNING_RATE_CRITIC * LR_DECAY **
                                              episodes).minimize(critic_loss)
 
+    ''' Create a tf operation to train the actor networks
+    - Calculate the Actor network's loss
+    - Create the tf operation to train the actor network
+    '''
     # Actor's loss
     actor_loss = -1 * tf.reduce_mean(q_values_of_suggested_actions)
     for var in actor_vars:
@@ -149,19 +204,6 @@ def main():
     # Optimize actor
     actor_train_op = tf.train.AdamOptimizer(LEARNING_RATE_ACTOR * LR_DECAY ** 
         episodes).minimize(actor_loss, var_list=actor_vars)
-
-    update_targets_ops = []
-    for i, target_actor_var in enumerate(target_actor_vars):
-        update_target_actor_op = target_actor_var.assign(TAU*actor_vars[i] +
-                                                         (1 - TAU)*target_actor_var)
-        update_targets_ops.append(update_target_actor_op)
-
-    for i, target_critic_var in enumerate(target_critic_vars):
-        update_target_critic_op = target_critic_var.assign(TAU*critic_vars[i] +
-                                                           (1 - TAU)*target_critic_var)
-        update_targets_ops.append(update_target_critic_op)
-
-    update_targets_op = tf.group(*update_targets_ops, name='update_targets')    
 
     # Init session
     sess = tf.Session()
@@ -185,14 +227,14 @@ def main():
             # env.render()
             # Reshape State
             # print("State initial" + str(state.shape)) (3,1)
-            state_to_feed = state.reshape(1, state.shape[0])
+            # state_to_feed = state.reshape(1, state.shape[0])
             # print("State to feed" + str(state_to_feed.shape)) (1, 3)
             state = np.squeeze(state)
             # print("State after " + str(state.shape)) #(3,)
 
             # Choose an action
-            action = sess.run(unscaled_actions, feed_dict={ \
-                state_placeholder: state_to_feed,
+            action = sess.run(actions, feed_dict={ \
+                state_placeholder: state[None],
                 is_training_placeholder: False})
             # print(action)
 
@@ -216,22 +258,16 @@ def main():
                 _, _ = sess.run([critic_train_op, actor_train_op], \
                     feed_dict={
                         state_placeholder: state_batch,
-
                         action_placeholder: np.asarray( \
                             [a[0] for a in action_batch]),
-
                         reward_placeholder: reward_batch,
-                    
                         is_not_terminal_placeholder: done_batch,
-
                         next_state_placeholder: next_state_batch,
-
                         is_training_placeholder: True
                 })
-                # update_target_networks(sess, TAU, 
-                #                        target_actor_vars, actor_vars, 
-                #                        target_critic_vars, critic_vars)
-                sess.run(update_targets_op)
+
+                _ = sess.run(update_targets_op)
+                # _ = sess.run(update_targets_op)
 
 
             state = next_state
@@ -247,12 +283,6 @@ def main():
     # write_to_file('info.json', json.dumps(info))
     env.close()
     # gym.upload(OUTPUT_DIR)
-
-
-# def update_target_networks(sess, tau,
-#                            target_actor_vars, actor_vars,
-#                            target_critic_vars, critic_vars):
-
 
 main()
 

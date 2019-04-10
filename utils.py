@@ -6,8 +6,7 @@ def scale_actions(actor_network_outputs, action_bound_low, action_bound_high):
     print("*")
     return actions
 
-def update_target_networks(sess, tau, 
-                           target_actor_vars, actor_vars, 
+def update_target_networks(tau, target_actor_vars, actor_vars, 
                            target_critic_vars, critic_vars):
     update_targets_ops = []
 
@@ -24,4 +23,5 @@ def update_target_networks(sess, tau,
 
     update_targets_op = tf.group(*update_targets_ops, name='update_targets')
     
-    sess.run(update_targets_op)
+    return update_targets_op
+
